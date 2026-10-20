@@ -1,0 +1,17 @@
+[project]
+name = "cryptoh"
+version = "0.1.0"
+description = "CLI tool: text blocks, byte editing, AES/DES/IDEA encryption, entropy and histograms"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "cryptography>=50.0.2",
+    "matplotlib>=3.11.2",
+]
+
+[project.scripts]
+cryptoh = "cryptoh.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
