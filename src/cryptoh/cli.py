@@ -76,6 +76,17 @@ def cmd_delbyte(args: argparse.Namespace) -> None:
     write_output(blocks.delete_bytes(data, args.bits, positions), args.output)
 
 
+def cmd_invbit(args: argparse.Namespace) -> None:
+    data = read_file(args.file)
+    write_output(blocks.invert_bit(data, args.bits, args.block, args.byte, args.bit), args.output)
+
+
+def cmd_delbit(args: argparse.Namespace) -> None:
+    data = read_file(args.file)
+    positions = [blocks.parse_bit_position(p) for p in args.pos]
+    write_output(blocks.delete_bits(data, args.bits, positions), args.output)
+
+
 def _cmd_generate(args: argparse.Namespace, what: str) -> None:
     data = cipher.generate(args.bits, what)
     if not args.hex and args.output is None and sys.stdout.isatty():
@@ -188,6 +199,35 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
     p.add_argument("--pos", nargs="+", required=True, metavar="BLOCK:BYTE", help="positions to delete, e.g. 0:1 3:7")
     _add_output(p)
     p.set_defaults(func=cmd_delbyte)
+
+    p = sub.add_parser(
+        "invbit",
+        help="invert a bit in a chosen byte of a block",
+        description="Inverts bit number BIT (0 = most significant, 7 = least significant) of byte number "
+        "BYTE in block number BLOCK (both counted from 0).",
+    )
+    p.add_argument("file", metavar="FILE", help="input file (not modified)")
+    _add_bits(p)
+    p.add_argument("--block", type=int, required=True, help="block number (from 0)")
+    p.add_argument("--byte", type=int, required=True, help="byte number within the block (from 0)")
+    p.add_argument("--bit", type=int, required=True, help="bit number within the byte (0 = most significant)")
+    _add_output(p)
+    p.set_defaults(func=cmd_invbit)
+
+    p = sub.add_parser(
+        "delbit",
+        help="delete bits at chosen positions",
+        description="Deletes bits at the given BLOCK:BYTE:BIT positions (counted from 0 in the input file; "
+        "bit 0 = most significant). Later bits shift left; if the result is not a whole number of bytes, "
+        "the last byte is padded with zero bits.",
+    )
+    p.add_argument("file", metavar="FILE", help="input file (not modified)")
+    _add_bits(p)
+    p.add_argument(
+        "--pos", nargs="+", required=True, metavar="BLOCK:BYTE:BIT", help="positions to delete, e.g. 0:1:0 3:7:5"
+    )
+    _add_output(p)
+    p.set_defaults(func=cmd_delbit)
 
     for name, func, what, lengths in (
         ("genkey", cmd_genkey, "key", "AES 128/192/256 bits, DES 64 bits, IDEA 128 bits"),

@@ -1,4 +1,4 @@
-"""Splitting text into blocks, modifying and deleting bytes, repeating text."""
+"""Splitting text into blocks, modifying and deleting bytes and bits, repeating text."""
 
 import logging
 
@@ -104,6 +104,56 @@ def delete_bytes(data: bytes, bits: int, positions: list[tuple[int, int]]) -> by
         del result[pos]
     log.info("deleted %d bytes", len(offsets))
     return bytes(result)
+
+
+def _bit_index(bit: int) -> int:
+    """Checks a bit number (0 = most significant bit of the byte, 7 = least significant)."""
+    if not 0 <= bit <= 7:
+        raise CryptohError(f"bit number {bit} is outside a byte (0–7, 0 = most significant)")
+    return bit
+
+
+def invert_bit(data: bytes, bits: int, block: int, byte: int, bit: int) -> bytes:
+    pos = _offset(data, bits, block, byte)
+    value = data[pos] ^ (0x80 >> _bit_index(bit))
+    log.info("inverting bit %d at offset %d: 0x%02x -> 0x%02x", bit, pos, data[pos], value)
+    return data[:pos] + bytes([value]) + data[pos + 1 :]
+
+
+def parse_bit_position(text: str) -> tuple[int, int, int]:
+    """Parses a position in BLOCK:BYTE:BIT format."""
+    try:
+        block, byte, bit = text.split(":")
+        return int(block), int(byte), int(bit)
+    except ValueError:
+        raise CryptohError(f"invalid position '{text}', expected BLOCK:BYTE:BIT, e.g. 2:5:0") from None
+
+
+def delete_bits(data: bytes, bits: int, positions: list[tuple[int, int, int]]) -> bytes:
+    """Deletes bits from the file treated as a bit stream (most significant bit first).
+
+    Later bits shift left; if the result is not a whole number of bytes, the last byte
+    is padded with zero bits.
+    """
+    offsets: set[int] = set()
+    for block, byte, bit in positions:
+        pos = _offset(data, bits, block, byte) * 8 + _bit_index(bit)
+        if pos in offsets:
+            log.warning("position %d:%d:%d given more than once — it will be deleted once", block, byte, bit)
+        offsets.add(pos)
+    stream = "".join(f"{b:08b}" for b in data)
+    kept = "".join(c for i, c in enumerate(stream) if i not in offsets)
+    padding = -len(kept) % 8
+    if padding:
+        log.warning(
+            "%d bits left — the last byte is padded with %d zero bits (%d bits deleted in total)",
+            len(kept),
+            padding,
+            len(offsets),
+        )
+    kept += "0" * padding
+    log.info("deleted %d bits", len(offsets))
+    return bytes(int(kept[i : i + 8], 2) for i in range(0, len(kept), 8))
 
 
 def repeat_text(text: str, length: int) -> bytes:

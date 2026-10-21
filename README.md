@@ -18,6 +18,8 @@ Exit code: 0 — success, 1 — error, 2 — invalid arguments.
 | `printblocks FILE -b BITS [--hex]` | text split into blocks of BITS bits, lines numbered from 0 | stdout or `-o` |
 | `setbyte FILE -b BITS --block B --byte K --value V` | change byte K in block B (`V`: a character or `0xNN`) | stdout or `-o` |
 | `delbyte FILE -b BITS --pos B:K [B:K ...]` | delete bytes at the given positions | stdout or `-o` |
+| `invbit FILE -b BITS --block B --byte K --bit N` | invert bit N of byte K in block B (bit 0 = most significant) | stdout or `-o` |
+| `delbit FILE -b BITS --pos B:K:N [B:K:N ...]` | delete bits at the given positions; later bits shift left, the last byte is padded with zero bits | stdout or `-o` |
 | `genkey -b BITS [--hex]` | random key of BITS bits (raw bytes or hex text) | stdout or `-o` |
 | `geniv -b BITS [--hex]` | random IV of BITS bits (raw bytes or hex text) | stdout or `-o` |
 | `encrypt` / `decrypt FILE -a {aes,des,idea} -m {ecb,cbc,cfb,ofb} -k KEYFILE [--key-hex] [--iv IVFILE [--iv-hex]]` | encryption / decryption | stdout or `-o` |
@@ -53,7 +55,7 @@ The results match OpenSSL: `aes` + `cfb` = `openssl enc -aes-128-cfb` (likewise 
 - Key lengths: AES 16/24/32 B, DES 8 B, IDEA 16 B.
 - ECB/CBC use PKCS7 padding; CFB/OFB work without padding.
 - The output is the **raw ciphertext** — the IV is not stored in it, so block operations
-  (`printblocks`, `setbyte`, `delbyte`) and `entropy` work on the real cipher blocks, and the file is
+  (`printblocks`, `setbyte`, `delbyte`, `invbit`, `delbit`) and `entropy` work on the real cipher blocks, and the file is
   compatible with other tools (e.g. `openssl enc -K … -iv …`).
 - The key and the IV are given only as files: `-k FILE` and `--iv FILE`. By default a file holds
   **raw bytes**; with `--key-hex` / `--iv-hex` it holds **hexadecimal text** (whitespace and a trailing
@@ -95,6 +97,8 @@ checks key/IV lengths and reads/writes the data.
 uv run cryptoh printblocks text.txt -b 64
 uv run cryptoh setbyte text.txt -b 64 --block 2 --byte 3 --value X -o changed.txt
 uv run cryptoh delbyte text.txt -b 64 --pos 0:0 1:4 -o shortened.txt
+uv run cryptoh invbit cipher.bin -b 64 --block 1 --byte 0 --bit 7 -o flipped.bin
+uv run cryptoh delbit cipher.bin -b 64 --pos 0:0:0 2:3:4 -o shortened.bin
 uv run cryptoh genkey -b 128 -o key.bin
 uv run cryptoh geniv -b 64 -o iv.bin
 uv run cryptoh encrypt text.txt -a idea -m cbc -k key.bin --iv iv.bin -o cipher.bin
