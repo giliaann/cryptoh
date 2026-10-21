@@ -76,29 +76,34 @@ def cmd_delbyte(args: argparse.Namespace) -> None:
     write_output(blocks.delete_bytes(data, args.bits, positions), args.output)
 
 
+def _cmd_generate(args: argparse.Namespace, what: str) -> None:
+    data = cipher.generate(args.bits, what)
+    if not args.hex and args.output is None and sys.stdout.isatty():
+        log.warning("writing raw %s bytes to the terminal — use --hex, -o FILE or a redirection", what)
+    write_output(cipher.format_secret(data, args.hex), args.output)
+
+
+def cmd_genkey(args: argparse.Namespace) -> None:
+    _cmd_generate(args, "key")
+
+
+def cmd_geniv(args: argparse.Namespace) -> None:
+    _cmd_generate(args, "IV")
+
+
 def cmd_encrypt(args: argparse.Namespace) -> None:
-    key = cipher.load_key(args.key, args.key_file, args.key_hex)
-    given_iv = cipher.load_iv(args.iv, args.iv_file)
-    iv = cipher.resolve_iv(args.alg, args.mode, given_iv, generate=True)
+    key = cipher.load_key(args.key, args.key_hex)
+    iv = cipher.load_iv(args.alg, args.mode, args.iv, args.iv_hex)
     data = read_file(args.file)
     result = cipher.encrypt(data, args.alg, args.mode, key, iv)
-
-    if args.iv_out is not None:
-        if iv:
-            write_output(iv, args.iv_out)
-        else:
-            log.warning("ECB mode uses no IV — '%s' was not written", args.iv_out)
-    elif iv and given_iv is None:
-        log.warning("generated random IV: %s — it is required for decryption (use --iv-out to save it)", iv.hex())
-
     if args.output is None and sys.stdout.isatty():
         log.warning("writing binary ciphertext to the terminal — use -o FILE or a redirection")
     write_output(result, args.output)
 
 
 def cmd_decrypt(args: argparse.Namespace) -> None:
-    key = cipher.load_key(args.key, args.key_file, args.key_hex)
-    iv = cipher.resolve_iv(args.alg, args.mode, cipher.load_iv(args.iv, args.iv_file), generate=False)
+    key = cipher.load_key(args.key, args.key_hex)
+    iv = cipher.load_iv(args.alg, args.mode, args.iv, args.iv_hex)
     data = read_file(args.file)
     write_output(cipher.decrypt(data, args.alg, args.mode, key, iv), args.output)
 
@@ -184,6 +189,21 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
     _add_output(p)
     p.set_defaults(func=cmd_delbyte)
 
+    for name, func, what, lengths in (
+        ("genkey", cmd_genkey, "key", "AES 128/192/256 bits, DES 64 bits, IDEA 128 bits"),
+        ("geniv", cmd_geniv, "IV", "AES 128 bits, DES/IDEA 64 bits"),
+    ):
+        p = sub.add_parser(
+            name,
+            help=f"generate a random {what}",
+            description=f"Generates a random {what} of BITS bits as raw bytes, or as hexadecimal text "
+            f"with --hex. Lengths: {lengths}.",
+        )
+        p.add_argument("-b", "--bits", type=int, required=True, help=f"{what} length in bits (multiple of 8)")
+        p.add_argument("--hex", action="store_true", help="write hexadecimal text instead of raw bytes")
+        _add_output(p)
+        p.set_defaults(func=func)
+
     for name, func, verb in (("encrypt", cmd_encrypt, "encrypt"), ("decrypt", cmd_decrypt, "decrypt")):
         p = sub.add_parser(
             name,
@@ -191,21 +211,16 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
             description=f"{verb.capitalize()} a file with the chosen algorithm and mode. "
             "The output is the raw result, without the IV. "
             "Key lengths: AES 16/24/32 B, DES 8 B, IDEA 16 B. "
-            "IV length (CBC/CFB/OFB) equals the block size: AES 16 B, DES/IDEA 8 B.",
+            "IV length (CBC/CFB/OFB) equals the block size: AES 128 bits, DES/IDEA 64 bits "
+            "Create key and IV files with 'cryptoh genkey' and 'cryptoh geniv'.",
         )
         p.add_argument("file", metavar="FILE", help="input file")
         p.add_argument("-a", "--alg", choices=cipher.ALGORITHMS, required=True, help="algorithm")
         p.add_argument("-m", "--mode", choices=cipher.MODES, required=True, help="mode of operation")
-        key = p.add_mutually_exclusive_group(required=True)
-        key.add_argument("-k", "--key", help="key given as text")
-        key.add_argument("-K", "--key-file", metavar="FILE", help="file containing the key")
-        p.add_argument("--key-hex", action="store_true", help="the key (or key file content) is hexadecimal")
-        iv = p.add_mutually_exclusive_group()
-        iv_help = "random if omitted" if name == "encrypt" else "required for CBC/CFB/OFB"
-        iv.add_argument("--iv", metavar="HEX", help=f"IV in hexadecimal ({iv_help})")
-        iv.add_argument("--iv-file", metavar="FILE", help=f"file with raw IV bytes ({iv_help})")
-        if name == "encrypt":
-            p.add_argument("--iv-out", metavar="FILE", help="save the IV used (raw bytes) to FILE")
+        p.add_argument("-k", "--key", required=True, metavar="FILE", help="file containing the key (raw bytes)")
+        p.add_argument("--key-hex", action="store_true", help="the key file contains hexadecimal text")
+        p.add_argument("--iv", metavar="FILE", help="file containing the IV (raw bytes; required for CBC/CFB/OFB)")
+        p.add_argument("--iv-hex", action="store_true", help="the IV file contains hexadecimal text")
         _add_output(p)
         p.set_defaults(func=func)
 

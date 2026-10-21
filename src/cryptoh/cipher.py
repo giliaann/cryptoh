@@ -49,47 +49,50 @@ def _mode(name: str, iv: bytes):
     return legacy_modes.OFB(iv)
 
 
-def load_key(key: str | None, key_file: str | None, key_hex: bool) -> bytes:
-    if key_file is not None:
-        raw = read_file(key_file)
-        if raw.endswith(b"\n") and not key_hex:
-            log.warning("key file '%s' ends with a newline — it is part of the key", key_file)
-        text = raw
-    else:
-        text = key.encode("utf-8")
-    if key_hex:
+def _read_secret(path: str, as_hex: bool, what: str) -> bytes:
+    """Reads a key or IV file: raw bytes, or hexadecimal text when as_hex is set."""
+    raw = read_file(path)
+    if as_hex:
         try:
-            return bytes.fromhex(text.decode("ascii").strip())
+            return bytes.fromhex(raw.decode("ascii").strip())
         except (UnicodeDecodeError, ValueError):
-            raise CryptohError("key is not a valid hexadecimal string") from None
-    return text
+            raise CryptohError(f"{what} file '{path}' does not contain a valid hexadecimal string") from None
+    if raw.endswith(b"\n"):
+        log.warning("%s file '%s' ends with a newline — it is part of the %s (use --%s-hex for hex text)",
+                    what, path, what, what.lower())
+    return raw
 
 
-def load_iv(iv_hex: str | None, iv_file: str | None) -> bytes | None:
-    """Returns the IV given as hex or as a file with raw bytes, or None when not given."""
-    if iv_file is not None:
-        return read_file(iv_file)
-    if iv_hex is not None:
-        try:
-            return bytes.fromhex(iv_hex)
-        except ValueError:
-            raise CryptohError("IV is not a valid hexadecimal string") from None
-    return None
+def generate(bits: int, what: str) -> bytes:
+    """Returns random bytes for a key or IV of the given length in bits (a positive multiple of 8)."""
+    if bits <= 0 or bits % 8 != 0:
+        raise CryptohError(f"{what} length must be a positive multiple of 8 bits, got {bits}")
+    return os.urandom(bits // 8)
 
 
-def resolve_iv(alg: str, mode: str, iv: bytes | None, generate: bool) -> bytes:
-    """Validates the IV for the given algorithm and mode; generates a random one if allowed."""
+def format_secret(data: bytes, as_hex: bool) -> bytes:
+    """Key/IV file content: raw bytes, or hexadecimal text ending with a newline."""
+    return data.hex().encode("ascii") + b"\n" if as_hex else data
+
+
+def load_key(key_file: str, as_hex: bool) -> bytes:
+    return _read_secret(key_file, as_hex, "key")
+
+
+def load_iv(alg: str, mode: str, iv_file: str | None, as_hex: bool) -> bytes:
+    """Reads and validates the IV for the given algorithm and mode; ECB uses no IV."""
     if mode == "ecb":
-        if iv is not None:
-            log.warning("IV is ignored in ECB mode")
+        if iv_file is not None:
+            log.warning("IV is ignored in ECB mode — '%s' was not read", iv_file)
         return b""
+    if iv_file is None:
+        raise CryptohError(f"mode {mode.upper()} requires an IV file (--iv FILE); create one with 'cryptoh geniv'")
+    iv = _read_secret(iv_file, as_hex, "IV")
     size = BLOCK_SIZES[alg]
-    if iv is None:
-        if not generate:
-            raise CryptohError(f"mode {mode.upper()} requires an IV (--iv or --iv-file)")
-        return os.urandom(size)
     if len(iv) != size:
-        raise CryptohError(f"{alg.upper()} IV must be {size} bytes ({size * 8} bits), got {len(iv)} bytes")
+        raise CryptohError(
+            f"{alg.upper()} IV must be {size} bytes ({size * 8} bits), got {len(iv)} bytes ({len(iv) * 8} bits)"
+        )
     return iv
 
 
