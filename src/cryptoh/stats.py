@@ -2,7 +2,6 @@
 
 import logging
 import math
-from collections import Counter
 from pathlib import Path
 
 import matplotlib
@@ -16,18 +15,28 @@ from cryptoh.files import prepare_output_path  # noqa: E402
 log = logging.getLogger(__name__)
 
 
+ALPHABET_SIZE = 256  # all possible byte values
+
+
+def byte_counts(data: bytes) -> list[int]:
+    """Occurrence count of every byte value 0x00..0xff (zeros included)."""
+    counts = [0] * ALPHABET_SIZE
+    for byte in data:
+        counts[byte] += 1
+    return counts
+
+
 def entropy(data: bytes) -> float:
-    """Shannon entropy in bits per byte."""
+    """Shannon entropy in bits per byte, over the 256-symbol byte alphabet."""
     if not data:
         return 0.0
     total = len(data)
-    return -sum(c / total * math.log2(c / total) for c in Counter(data).values())
+    return -sum(c / total * math.log2(c / total) for c in byte_counts(data) if c)
 
 
 def max_entropy(data: bytes) -> float:
-    """Maximum entropy for the alphabet of symbols that occur in the text."""
-    distinct = len(set(data))
-    return math.log2(distinct) if distinct > 1 else 0.0
+    """Maximum entropy for the 256-symbol byte alphabet: log2(256) = 8 bits."""
+    return math.log2(ALPHABET_SIZE)
 
 
 def _save(fig, path: str) -> None:
@@ -50,44 +59,29 @@ def entropy_chart(files: dict[str, bytes], output: str) -> list[tuple[str, float
 
     labels = [Path(name).name for name, _, _ in rows]
     x = range(len(rows))
-    width = 0.38
-    fig, ax = plt.subplots(figsize=(max(6, 1.6 * len(rows) + 2), 5))
-    bars_h = ax.bar([i - width / 2 for i in x], [r[1] for r in rows], width, label="Entropy")
-    bars_max = ax.bar([i + width / 2 for i in x], [r[2] for r in rows], width, label="Maximum entropy")
-    ax.bar_label(bars_h, fmt="%.3f", fontsize=8)
-    ax.bar_label(bars_max, fmt="%.3f", fontsize=8)
+    fig, ax = plt.subplots(figsize=(max(6, 1.2 * len(rows) + 2), 5))
+    bars = ax.bar(list(x), [r[1] for r in rows], 0.6)
+    ax.bar_label(bars, fmt="%.3f", fontsize=8)
     ax.set_xticks(list(x), labels, rotation=20 if len(rows) > 3 else 0, ha="right" if len(rows) > 3 else "center")
     ax.set_ylabel("bits per symbol")
-    ax.set_title("Text entropy")
-    ax.set_ylim(0, max([8.0] + [r[2] for r in rows]) * 1.1)
-    ax.legend()
+    ax.set_title(f"Text entropy (maximum entropy = {math.log2(ALPHABET_SIZE):.2f} for {ALPHABET_SIZE} bytes)")
+    ax.set_ylim(0, math.log2(ALPHABET_SIZE) * 1.1)
     _save(fig, output)
     return rows
 
 
-def _label(byte: int) -> str:
-    special = {0x0A: "\\n", 0x0D: "\\r", 0x09: "\\t", 0x20: "␣"}
-    if byte in special:
-        return special[byte]
-    if 0x21 <= byte <= 0x7E:
-        return chr(byte)
-    return f"0x{byte:02x}"
-
-
-def histogram_chart(name: str, data: bytes, output: str) -> Counter:
+def histogram_chart(name: str, data: bytes, output: str) -> list[int]:
     if not data:
         raise CryptohError(f"file '{name}' is empty — no characters for a histogram")
-    counts = Counter(data)
-    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    if len(items) > 100:
-        log.warning("text contains %d distinct bytes — axis labels may be unreadable", len(items))
+    counts = byte_counts(data)
+    distinct = sum(1 for c in counts if c)
 
-    fig, ax = plt.subplots(figsize=(max(8, 0.22 * len(items) + 2), 5))
-    ax.bar(range(len(items)), [c for _, c in items])
-    ax.set_xticks(range(len(items)), [_label(b) for b, _ in items], fontsize=7, rotation=90)
-    ax.set_xlim(-0.6, len(items) - 0.4)
-    ax.set_xlabel("character (byte)")
+    fig, ax = plt.subplots(figsize=(30, 6))
+    ax.bar(range(ALPHABET_SIZE), counts, width=0.8)
+    ax.set_xticks(range(ALPHABET_SIZE), [f"{b:02X}" for b in range(ALPHABET_SIZE)], fontsize=6, rotation=90)
+    ax.set_xlim(-0.6, ALPHABET_SIZE - 0.4)
+    ax.set_xlabel("byte (hex)")
     ax.set_ylabel("occurrences")
-    ax.set_title(f"Character histogram: {Path(name).name} ({len(data)} bytes, {len(items)} distinct)")
+    ax.set_title(f"Byte histogram: {Path(name).name} ({len(data)} bytes, {distinct} of {ALPHABET_SIZE} distinct)")
     _save(fig, output)
     return counts

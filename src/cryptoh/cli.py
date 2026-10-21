@@ -119,7 +119,8 @@ def cmd_histogram(args: argparse.Namespace) -> None:
 
     data = read_file(args.file)
     counts = stats.histogram_chart(args.file, data, args.output)
-    print(f"saved histogram of {len(counts)} distinct characters to '{args.output}'")
+    distinct = sum(1 for n in counts if n)
+    print(f"saved histogram of all 256 byte values ({distinct} occurring) to '{args.output}'")
 
 
 def cmd_repeat(args: argparse.Namespace) -> None:
@@ -210,9 +211,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
 
     p = sub.add_parser(
         "entropy",
-        help="bar chart of entropies and maximum entropies",
-        description="Computes the Shannon entropy and the maximum entropy (log2 of the number of distinct "
-        "characters) of the given files and saves a bar chart.",
+        help="bar chart of entropies (maximum entropy shown in the title)",
+        description="Computes the Shannon entropy and the maximum entropy (log2(256) = 8 bits, "
+        "the full byte alphabet) of the given files and saves a bar chart.",
     )
     p.add_argument("files", nargs="+", metavar="FILE", help="input files")
     _add_output(p, required=True)
@@ -221,7 +222,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
     p = sub.add_parser(
         "histogram",
         help="character frequency histogram",
-        description="Creates a histogram of character frequencies in a file and saves it as a chart.",
+        description="Creates a histogram of all 256 byte values (zeros included, hex labels) in a file "
+        "and saves it as a chart.",
     )
     p.add_argument("file", metavar="FILE", help="input file")
     _add_output(p, required=True)

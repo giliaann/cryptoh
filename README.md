@@ -19,8 +19,8 @@ Exit code: 0 — success, 1 — error, 2 — invalid arguments.
 | `setbyte FILE -b BITS --block B --byte K --value V` | change byte K in block B (`V`: a character or `0xNN`) | stdout or `-o` |
 | `delbyte FILE -b BITS --pos B:K [B:K ...]` | delete bytes at the given positions | stdout or `-o` |
 | `encrypt` / `decrypt FILE -a {aes,des,idea} -m {ecb,cbc,cfb,ofb} (-k KEY \| -K FILE) [--key-hex] [--iv HEX \| --iv-file FILE]` | encryption / decryption | stdout or `-o` |
-| `entropy FILE [FILE ...] -o CHART` | bar chart of entropies and maximum entropies | `-o` (required) |
-| `histogram FILE -o CHART` | character frequency histogram | `-o` (required) |
+| `entropy FILE [FILE ...] -o CHART` | bar chart of entropies (maximum entropy 8.00 in the title) | `-o` (required) |
+| `histogram FILE -o CHART` | histogram of all 256 byte values | `-o` (required) |
 | `repeat TEXT -n N` | repeat text up to exactly N bytes | stdout or `-o` |
 | `help [COMMAND]` | help | stdout |
 
@@ -37,7 +37,8 @@ Exit code: 0 — success, 1 — error, 2 — invalid arguments.
   - `decrypt`: the IV is required (`--iv` or `--iv-file`).
 - ECB uses no IV.
 
-Entropy: `H = -Σ p·log2(p)` computed over bytes; maximum entropy = `log2(number of distinct bytes in the text)`.
+Entropy: `H = -Σ p·log2(p)` computed over the alphabet of all 256 byte values; maximum entropy = `log2(256) = 8` bits.
+The histogram shows all 256 byte values `00`–`FF` (hex labels), including those that do not occur.
 
 ## Examples
 
