@@ -106,6 +106,47 @@ def delete_bytes(data: bytes, bits: int, positions: list[tuple[int, int]]) -> by
     return bytes(result)
 
 
+def insert_byte(data: bytes, bits: int, block: int, byte: int, value: int) -> bytes:
+    """Inserts a byte so that it becomes byte BYTE of block BLOCK; later bytes shift right."""
+    size = block_size(bits)
+    if block < 0 or byte < 0:
+        raise CryptohError("block and byte numbers must be non-negative")
+    if byte >= size:
+        raise CryptohError(f"byte number {byte} is outside a block of {size} bytes")
+    pos = block * size + byte
+    if pos > len(data):
+        raise CryptohError(
+            f"position block {block}, byte {byte} (offset {pos}) is past the end of the file of {len(data)} bytes"
+        )
+    log.info("inserting 0x%02x at offset %d", value, pos)
+    return data[:pos] + bytes([value]) + data[pos:]
+
+
+def parse_block_value(value: str, bits: int) -> bytes:
+    """Parses block content given as hexadecimal text (whitespace ignored)."""
+    try:
+        content = bytes.fromhex(value)
+    except ValueError:
+        raise CryptohError(f"invalid hexadecimal block '{value}'") from None
+    if len(content) != block_size(bits):
+        raise CryptohError(f"block '{value}' has {len(content) * 8} bits instead of {bits}")
+    return content
+
+
+def insert_block(data: bytes, bits: int, block: int, content: bytes) -> bytes:
+    """Inserts a whole block so that it becomes block number BLOCK; later blocks shift right."""
+    size = block_size(bits)
+    if len(content) != size:
+        raise CryptohError(f"block content has {len(content) * 8} bits instead of {bits}")
+    if block < 0:
+        raise CryptohError("block number must be non-negative")
+    pos = block * size
+    if pos > len(data):
+        raise CryptohError(f"block {block} (offset {pos}) is past the end of the file of {len(data)} bytes")
+    log.info("inserting block %s at offset %d", content.hex(" "), pos)
+    return data[:pos] + content + data[pos:]
+
+
 def _bit_index(bit: int) -> int:
     """Checks a bit number (0 = most significant bit of the byte, 7 = least significant)."""
     if not 0 <= bit <= 7:

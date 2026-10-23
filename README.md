@@ -18,6 +18,8 @@ Exit code: 0 — success, 1 — error, 2 — invalid arguments.
 | `printblocks FILE -b BITS [--hex]` | text split into blocks of BITS bits, lines numbered from 0 | stdout or `-o` |
 | `setbyte FILE -b BITS --block B --byte K --value V` | change byte K in block B (`V`: a character or `0xNN`) | stdout or `-o` |
 | `delbyte FILE -b BITS --pos B:K [B:K ...]` | delete bytes at the given positions | stdout or `-o` |
+| `insbyte FILE -b BITS --block B --byte K --value V` | insert a byte so it becomes byte K of block B; later bytes shift right | stdout or `-o` |
+| `insblock FILE -b BITS --block B [--value HEX]` | insert a block (random by default) so it becomes block B; later blocks shift right | stdout or `-o` |
 | `invbit FILE -b BITS --block B --byte K --bit N` | invert bit N of byte K in block B (bit 0 = most significant) | stdout or `-o` |
 | `delbit FILE -b BITS --pos B:K:N [B:K:N ...]` | delete bits at the given positions; later bits shift left, the last byte is padded with zero bits | stdout or `-o` |
 | `genkey -b BITS [--hex]` | random key of BITS bits (raw bytes or hex text) | stdout or `-o` |
@@ -97,6 +99,8 @@ checks key/IV lengths and reads/writes the data.
 uv run cryptoh printblocks text.txt -b 64
 uv run cryptoh setbyte text.txt -b 64 --block 2 --byte 3 --value X -o changed.txt
 uv run cryptoh delbyte text.txt -b 64 --pos 0:0 1:4 -o shortened.txt
+uv run cryptoh insbyte cipher.bin -b 128 --block 4 --byte 2 --value X -o inserted.bin
+uv run cryptoh insblock cipher.bin -b 128 --block 4 -o extra_block.bin
 uv run cryptoh invbit cipher.bin -b 64 --block 1 --byte 0 --bit 7 -o flipped.bin
 uv run cryptoh delbit cipher.bin -b 64 --pos 0:0:0 2:3:4 -o shortened.bin
 uv run cryptoh genkey -b 128 -o key.bin

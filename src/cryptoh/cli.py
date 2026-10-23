@@ -76,6 +76,21 @@ def cmd_delbyte(args: argparse.Namespace) -> None:
     write_output(blocks.delete_bytes(data, args.bits, positions), args.output)
 
 
+def cmd_insbyte(args: argparse.Namespace) -> None:
+    data = read_file(args.file)
+    value = blocks.parse_byte_value(args.value)
+    write_output(blocks.insert_byte(data, args.bits, args.block, args.byte, value), args.output)
+
+
+def cmd_insblock(args: argparse.Namespace) -> None:
+    data = read_file(args.file)
+    if args.value is None:
+        content = os.urandom(blocks.block_size(args.bits))
+    else:
+        content = blocks.parse_block_value(args.value, args.bits)
+    write_output(blocks.insert_block(data, args.bits, args.block, content), args.output)
+
+
 def cmd_invbit(args: argparse.Namespace) -> None:
     data = read_file(args.file)
     write_output(blocks.invert_bit(data, args.bits, args.block, args.byte, args.bit), args.output)
@@ -199,6 +214,33 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
     p.add_argument("--pos", nargs="+", required=True, metavar="BLOCK:BYTE", help="positions to delete, e.g. 0:1 3:7")
     _add_output(p)
     p.set_defaults(func=cmd_delbyte)
+
+    p = sub.add_parser(
+        "insbyte",
+        help="insert a byte at a chosen position",
+        description="Inserts a byte so that it becomes byte number BYTE in block number BLOCK "
+        "(both counted from 0); later bytes shift right.",
+    )
+    p.add_argument("file", metavar="FILE", help="input file (not modified)")
+    _add_bits(p)
+    p.add_argument("--block", type=int, required=True, help="block number (from 0)")
+    p.add_argument("--byte", type=int, required=True, help="byte number within the block (from 0)")
+    p.add_argument("--value", required=True, help="inserted value: a single ASCII character or 0xNN")
+    _add_output(p)
+    p.set_defaults(func=cmd_insbyte)
+
+    p = sub.add_parser(
+        "insblock",
+        help="insert a block at a chosen position",
+        description="Inserts a whole block so that it becomes block number BLOCK (counted from 0); "
+        "later blocks shift right. The block is random (os.urandom) unless --value is given.",
+    )
+    p.add_argument("file", metavar="FILE", help="input file (not modified)")
+    _add_bits(p)
+    p.add_argument("--block", type=int, required=True, help="block number (from 0)")
+    p.add_argument("--value", metavar="HEX", help="block content in hexadecimal (default: random bytes)")
+    _add_output(p)
+    p.set_defaults(func=cmd_insblock)
 
     p = sub.add_parser(
         "invbit",

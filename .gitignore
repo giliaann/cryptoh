@@ -9,5 +9,6 @@ wheels/
 # Virtual environments
 .venv
 
-# User data
+# User data, scripts
 data
+scripts
