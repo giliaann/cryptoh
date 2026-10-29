@@ -4,9 +4,11 @@ import argparse
 import logging
 import os
 import sys
+import time
+from collections.abc import Callable
 from typing import NoReturn
 
-from cryptoh import blocks, cipher
+from cryptoh import blocks, cipher, rsa_cipher
 from cryptoh.errors import CryptohError
 from cryptoh.files import read_file, write_output
 
@@ -117,21 +119,56 @@ def cmd_geniv(args: argparse.Namespace) -> None:
     _cmd_generate(args, "IV")
 
 
-def cmd_encrypt(args: argparse.Namespace) -> None:
+def cmd_genrsa(args: argparse.Namespace) -> None:
+    key = rsa_cipher.generate(args.bits)
+    write_output(rsa_cipher.format_key(key, private=True), args.output)
+    if args.pub is not None:
+        write_output(rsa_cipher.format_key(key, private=False), args.pub)
+
+
+def _cipher_operation(args: argparse.Namespace, encrypting: bool) -> tuple[Callable[[bytes], bytes], str]:
+    """Loads the key (and IV) and returns the cipher operation with a name for the timing message."""
+    if args.alg == "rsa":
+        ignored = {"-m": args.mode, "--iv": args.iv, "--key-hex": args.key_hex, "--iv-hex": args.iv_hex}
+        for option, given in ignored.items():
+            if given:
+                log.warning("%s is ignored for RSA", option)
+        rsa_key = rsa_cipher.load_key(args.key)
+        operation = rsa_cipher.encrypt if encrypting else rsa_cipher.decrypt
+        return lambda data: operation(data, rsa_key), f"RSA-{rsa_key.bits}"
+
+    if args.mode is None:
+        raise CryptohError(f"{args.alg.upper()} requires a mode of operation (-m {{{','.join(cipher.MODES)}}})")
     key = cipher.load_key(args.key, args.key_hex)
     iv = cipher.load_iv(args.alg, args.mode, args.iv, args.iv_hex)
+    operation = cipher.encrypt if encrypting else cipher.decrypt
+    return lambda data: operation(data, args.alg, args.mode, key, iv), f"{args.alg.upper()}-{args.mode.upper()}"
+
+
+def _run_cipher(args: argparse.Namespace, encrypting: bool) -> bytes:
+    operation, name = _cipher_operation(args, encrypting)
     data = read_file(args.file)
-    result = cipher.encrypt(data, args.alg, args.mode, key, iv)
+    start = time.perf_counter_ns()
+    result = operation(data)
+    elapsed = time.perf_counter_ns() - start
+    if args.time:
+        # written directly to stderr so that it is shown regardless of -q
+        verb = "encryption" if encrypting else "decryption"
+        rate = len(data) / elapsed * 1e9 / 2**20 if elapsed else float("inf")
+        print(f"cryptoh: time: {verb} {name}: {elapsed / 1e6:.3f} ms "
+              f"({len(data)} -> {len(result)} bytes, {rate:.2f} MiB/s)", file=sys.stderr)
+    return result
+
+
+def cmd_encrypt(args: argparse.Namespace) -> None:
+    result = _run_cipher(args, encrypting=True)
     if args.output is None and sys.stdout.isatty():
         log.warning("writing binary ciphertext to the terminal — use -o FILE or a redirection")
     write_output(result, args.output)
 
 
 def cmd_decrypt(args: argparse.Namespace) -> None:
-    key = cipher.load_key(args.key, args.key_hex)
-    iv = cipher.load_iv(args.alg, args.mode, args.iv, args.iv_hex)
-    data = read_file(args.file)
-    write_output(cipher.decrypt(data, args.alg, args.mode, key, iv), args.output)
+    write_output(_run_cipher(args, encrypting=False), args.output)
 
 
 def cmd_entropy(args: argparse.Namespace) -> None:
@@ -152,6 +189,24 @@ def cmd_histogram(args: argparse.Namespace) -> None:
     counts = stats.histogram_chart(args.file, data, args.output)
     distinct = sum(1 for n in counts if n)
     print(f"saved histogram of all 256 byte values ({distinct} occurring) to '{args.output}'")
+
+
+def cmd_autocorr(args: argparse.Namespace) -> None:
+    from cryptoh import stats
+
+    files = {path: read_file(path) for path in args.files}
+    rows = stats.autocorrelation_chart(files, args.max_shift, args.output)
+    width = max(len(name) for name, _, _ in rows)
+    print(f"{'file':<{width}}  {'bytes':>9}  {'shifts':>6}  {'mean':>9}  {'random':>9}  {'max':>9}  {'at shift':>8}")
+    for name, shift, counts in rows:
+        size = len(files[name])
+        mean = sum(counts) / shift
+        # expected matches for uniformly random bytes, averaged over the shifts
+        random = sum(size - k for k in range(1, shift + 1)) / shift / stats.ALPHABET_SIZE
+        peak = max(counts)
+        print(f"{name:<{width}}  {size:>9}  {shift:>6}  {mean:>9.2f}  {random:>9.2f}  {peak:>9}  "
+              f"{counts.index(peak) + 1:>8}")
+    print(f"saved autocorrelation chart to '{args.output}'")
 
 
 def cmd_repeat(args: argparse.Namespace) -> None:
@@ -286,23 +341,42 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
         _add_output(p)
         p.set_defaults(func=func)
 
+    p = sub.add_parser(
+        "genrsa",
+        help="generate an RSA key pair",
+        description="Generates an RSA private key (PKCS#8 PEM, public exponent 65537) of BITS bits. "
+        "The public key (SubjectPublicKeyInfo PEM) is written to --pub.",
+    )
+    p.add_argument("-b", "--bits", type=int, required=True, choices=rsa_cipher.KEY_BITS, help="modulus length in bits")
+    p.add_argument("--pub", metavar="FILE", help="also write the public key to FILE")
+    _add_output(p)
+    p.set_defaults(func=cmd_genrsa)
+
     for name, func, verb in (("encrypt", cmd_encrypt, "encrypt"), ("decrypt", cmd_decrypt, "decrypt")):
         p = sub.add_parser(
             name,
-            help=f"{verb} a file (AES/DES/IDEA, ECB/CBC/CFB/OFB)",
+            help=f"{verb} a file (AES/DES/IDEA in ECB/CBC/CFB/OFB, or RSA)",
             description=f"{verb.capitalize()} a file with the chosen algorithm and mode. "
             "The output is the raw result, without the IV. "
             "Key lengths: AES 16/24/32 B, DES 8 B, IDEA 16 B. "
-            "IV length (CBC/CFB/OFB) equals the block size: AES 128 bits, DES/IDEA 64 bits "
-            "Create key and IV files with 'cryptoh genkey' and 'cryptoh geniv'.",
+            "IV length (CBC/CFB/OFB) equals the block size: AES 128 bits, DES/IDEA 64 bits. "
+            "Create key and IV files with 'cryptoh genkey' and 'cryptoh geniv'. "
+            "RSA (-a rsa) needs no mode or IV: textbook RSA without padding on "
+            "chunks of k-1 bytes (k = length of n in bytes), the last chunk padded with zero bytes. "
+            "The key is a PEM file from 'cryptoh genrsa' (public or private for encryption, private for decryption).",
         )
         p.add_argument("file", metavar="FILE", help="input file")
-        p.add_argument("-a", "--alg", choices=cipher.ALGORITHMS, required=True, help="algorithm")
-        p.add_argument("-m", "--mode", choices=cipher.MODES, required=True, help="mode of operation")
-        p.add_argument("-k", "--key", required=True, metavar="FILE", help="file containing the key (raw bytes)")
+        p.add_argument("-a", "--alg", choices=(*cipher.ALGORITHMS, "rsa"), required=True, help="algorithm")
+        p.add_argument("-m", "--mode", choices=cipher.MODES, help="mode of operation (required except for RSA)")
+        p.add_argument(
+            "-k", "--key", required=True, metavar="FILE", help="file containing the key (raw bytes; PEM for RSA)"
+        )
         p.add_argument("--key-hex", action="store_true", help="the key file contains hexadecimal text")
         p.add_argument("--iv", metavar="FILE", help="file containing the IV (raw bytes; required for CBC/CFB/OFB)")
         p.add_argument("--iv-hex", action="store_true", help="the IV file contains hexadecimal text")
+        p.add_argument(
+            "-t", "--time", action="store_true", help=f"print the {verb}ion time (without file I/O) to stderr"
+        )
         _add_output(p)
         p.set_defaults(func=func)
 
@@ -325,6 +399,20 @@ def build_parser() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]
     p.add_argument("file", metavar="FILE", help="input file")
     _add_output(p, required=True)
     p.set_defaults(func=cmd_histogram)
+
+    p = sub.add_parser(
+        "autocorr",
+        help="autocorrelation chart",
+        description="For every shift k = 1..N counts the bytes equal to the byte k positions further "
+        "(the text compared with itself shifted by k, without wrap-around) and saves a line chart. "
+        "Several files are drawn on one chart.",
+    )
+    p.add_argument("files", nargs="+", metavar="FILE", help="input files")
+    p.add_argument(
+        "-n", "--max-shift", type=int, default=256, metavar="N", help="largest shift in bytes (default: 256)"
+    )
+    _add_output(p, required=True)
+    p.set_defaults(func=cmd_autocorr)
 
     p = sub.add_parser(
         "repeat",

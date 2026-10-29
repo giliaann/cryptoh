@@ -1,10 +1,11 @@
-"""Entropy and charts: entropy bar chart and character frequency histogram."""
+"""Entropy and charts: entropy bar chart, character frequency histogram and autocorrelation."""
 
 import logging
 import math
 from pathlib import Path
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -85,3 +86,35 @@ def histogram_chart(name: str, data: bytes, output: str) -> list[int]:
     ax.set_title(f"Byte histogram: {Path(name).name} ({len(data)} bytes, {distinct} of {ALPHABET_SIZE} distinct)")
     _save(fig, output)
     return counts
+
+
+def autocorrelation(data: bytes, max_shift: int) -> list[int]:
+    """Number of positions i with data[i] == data[i + k], for shifts k = 1..max_shift (no wrap-around)."""
+    a = np.frombuffer(data, dtype=np.uint8)
+    return [int(np.count_nonzero(a[:-k] == a[k:])) for k in range(1, max_shift + 1)]
+
+
+def autocorrelation_chart(files: dict[str, bytes], max_shift: int, output: str) -> list[tuple[str, int, list[int]]]:
+    if max_shift <= 0:
+        raise CryptohError(f"maximum shift must be positive, got {max_shift}")
+    rows = []
+    for name, data in files.items():
+        if len(data) < 2:
+            raise CryptohError(f"file '{name}' has {len(data)} bytes — at least 2 are needed for autocorrelation")
+        shift = min(max_shift, len(data) - 1)
+        if shift < max_shift:
+            log.warning("file '%s' has %d bytes — shifts limited to %d", name, len(data), shift)
+        rows.append((name, shift, autocorrelation(data, shift)))
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for name, shift, counts in rows:
+        ax.plot(range(1, shift + 1), counts, linewidth=1, label=f"{Path(name).name} ({len(files[name])} bytes)")
+    ax.set_xlim(0.5, max(shift for _, shift, _ in rows) + 0.5)
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel("shift (bytes)")
+    ax.set_ylabel("matching bytes")
+    ax.set_title("Autocorrelation: bytes equal to the byte shifted by k positions")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    _save(fig, output)
+    return rows
